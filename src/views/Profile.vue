@@ -13,6 +13,7 @@
         :rules="profileRules"
         label-width="120px"
         class="profile-form"
+        v-loading="loading"
       >
         <el-row :gutter="20">
           <el-col :span="12">
@@ -20,10 +21,9 @@
               <el-avatar :size="100" :src="profileForm.avatar" class="avatar-preview" />
               <el-upload
                 class="avatar-uploader"
-                action="/api/upload/avatar"
-                :headers="uploadHeaders"
+                action=""
+                :http-request="handleAvatarUpload"
                 :show-file-list="false"
-                :on-success="handleAvatarSuccess"
                 :before-upload="beforeAvatarUpload"
               >
                 <el-button size="small" type="primary">更换头像</el-button>
@@ -50,7 +50,7 @@
           </el-col>
         </el-row>
         
-        <el-form-item label="个人简介">
+        <el-form-item label="个人简介" prop="bio">
           <el-input
             v-model="profileForm.bio"
             type="textarea"
@@ -60,7 +60,7 @@
         </el-form-item>
         
         <el-form-item>
-          <el-button type="primary" @click="saveProfile">保存资料</el-button>
+          <el-button type="primary" @click="saveProfile" :loading="saving">保存资料</el-button>
           <el-button @click="resetForm">重置</el-button>
         </el-form-item>
       </el-form>
@@ -108,30 +108,34 @@
         </el-form-item>
         
         <el-form-item>
-          <el-button type="primary" @click="changePassword">修改密码</el-button>
+          <el-button type="primary" @click="handleChangePassword" :loading="changingPassword">修改密码</el-button>
         </el-form-item>
       </el-form>
     </el-card>
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { computed } from 'vue'
+import { getCurrentUser, updateUser, changePassword as changePasswordApi, uploadAvatar, getUser } from '@/api/user'
+import type { UserInfo } from '@/types/user'
 
 const userStore = useUserStore()
-
-// 添加上传请求头，包含 token
-const uploadHeaders = computed(() => ({
-  Authorization: `Bearer ${userStore.token}`
-}))
 
 const profileFormRef = ref()
 const securityFormRef = ref()
 
+const loading = ref(false)
+const saving = ref(false)
+const changingPassword = ref(false)
+
+// 存储原始用户数据用于重置
+let originalUserData: UserInfo | null = null
+
 const profileForm = reactive({
+  id: '',
   username: '',
   name: '',
   email: '',
@@ -146,7 +150,7 @@ const securityForm = reactive({
   confirmPassword: ''
 })
 
-const profileRules = {
+const profileRules: FormRules = {
   name: [
     { required: true, message: '请输入姓名', trigger: 'blur' }
   ],
@@ -159,7 +163,7 @@ const profileRules = {
   ]
 }
 
-const securityRules = {
+const securityRules: FormRules = {
   oldPassword: [
     { required: true, message: '请输入原密码', trigger: 'blur' }
   ],
@@ -170,7 +174,7 @@ const securityRules = {
   confirmPassword: [
     { required: true, message: '请确认新密码', trigger: 'blur' },
     {
-      validator: (rule, value, callback) => {
+      validator: (rule: any, value: string, callback: (error?: Error) => void) => {
         if (value !== securityForm.newPassword) {
           callback(new Error('两次输入的密码不一致'))
         } else {
@@ -187,22 +191,43 @@ onMounted(() => {
   loadProfile()
 })
 
-const loadProfile = () => {
-  // 模拟从store获取用户信息
-  profileForm.username = userStore.username || 'user123'
-  profileForm.name = userStore.name || '张三'
-  profileForm.email = userStore.email || 'user@example.com'
-  profileForm.phone = userStore.phone || '13800138000'
-  profileForm.bio = userStore.bio || '这个人很懒，什么都没有留下'
-  profileForm.avatar = userStore.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+const loadProfile = async () => {
+  loading.value = true
+  try {
+    let id =userStore.userInfo.id
+    const userData = await getUser(id)
+    originalUserData = userData
+    
+    profileForm.id = userData.id
+    profileForm.username = userData.username
+    profileForm.name = userData.username || ''
+    profileForm.email = userData.email || ''
+    profileForm.phone = userData.telephoneNumber || ''
+    profileForm.bio = userData.introduction || ''
+    profileForm.avatar = userData.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+    
+    // 同步更新 store 中的用户信息
+    userStore.setUser(userData)
+  } catch (error) {
+    console.error('加载用户信息失败:', error)
+    ElMessage.error('加载用户信息失败')
+  } finally {
+    loading.value = false
+  }
 }
 
-const handleAvatarSuccess = (response, uploadFile) => {
-  profileForm.avatar = URL.createObjectURL(uploadFile.raw)
-  ElMessage.success('头像上传成功')
+const handleAvatarUpload = async (options: any) => {
+  try {
+    const result = await uploadAvatar(options.file)
+    profileForm.avatar = result.url
+    ElMessage.success('头像上传成功')
+  } catch (error) {
+    console.error('头像上传失败:', error)
+    ElMessage.error('头像上传失败')
+  }
 }
 
-const beforeAvatarUpload = (rawFile) => {
+const beforeAvatarUpload = (rawFile: File) => {
   if (rawFile.type !== 'image/jpeg' && rawFile.type !== 'image/png') {
     ElMessage.error('头像必须是 JPG 或 PNG 格式!')
     return false
@@ -215,26 +240,57 @@ const beforeAvatarUpload = (rawFile) => {
 
 const saveProfile = async () => {
   if (!profileFormRef.value) return
-  await profileFormRef.value.validate((valid) => {
+  
+  await profileFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
-      // 模拟保存用户信息
-      ElMessage.success('资料保存成功')
+      saving.value = true
+      try {
+        await updateUser({
+          id: profileForm.id,
+          name: profileForm.name,
+          email: profileForm.email,
+          telephone_number: profileForm.phone,
+          introduction: profileForm.bio,
+          avatar: profileForm.avatar
+        })
+        ElMessage.success('资料保存成功')
+        
+        // 重新加载用户信息
+        await loadProfile()
+      } catch (error) {
+        console.error('保存用户信息失败:', error)
+        ElMessage.error('保存用户信息失败')
+      } finally {
+        saving.value = false
+      }
     } else {
       ElMessage.error('请检查表单信息')
     }
   })
 }
 
-const changePassword = async () => {
+const handleChangePassword = async () => {
   if (!securityFormRef.value) return
-  await securityFormRef.value.validate((valid) => {
+  
+  await securityFormRef.value.validate(async (valid: boolean) => {
     if (valid) {
-      // 模拟修改密码
-      ElMessage.success('密码修改成功')
-      // 重置表单
-      securityForm.oldPassword = ''
-      securityForm.newPassword = ''
-      securityForm.confirmPassword = ''
+      changingPassword.value = true
+      try {
+        await changePasswordApi({
+          oldPassword: securityForm.oldPassword,
+          newPassword: securityForm.newPassword
+        })
+        ElMessage.success('密码修改成功')
+        // 重置表单
+        securityForm.oldPassword = ''
+        securityForm.newPassword = ''
+        securityForm.confirmPassword = ''
+      } catch (error) {
+        console.error('修改密码失败:', error)
+        ElMessage.error('修改密码失败')
+      } finally {
+        changingPassword.value = false
+      }
     } else {
       ElMessage.error('请检查密码信息')
     }
@@ -242,7 +298,15 @@ const changePassword = async () => {
 }
 
 const resetForm = () => {
-  loadProfile()
+  if (originalUserData) {
+    profileForm.id = originalUserData.id
+    profileForm.username = originalUserData.username
+    profileForm.name = originalUserData.username || ''
+    profileForm.email = originalUserData.email || ''
+    profileForm.phone = originalUserData.telephoneNumber || ''
+    profileForm.bio = originalUserData.introduction || ''
+    profileForm.avatar = originalUserData.avatar || 'https://cube.elemecdn.com/3/7c/3ea6beec64369c2642b92c6726f1epng.png'
+  }
   ElMessage.info('表单已重置')
 }
 </script>

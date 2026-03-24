@@ -39,11 +39,18 @@ export interface SubscriptionPlanConfigs {
 
 // 从 auth.ts 复制的接口定义
 export interface UserInfo {
-  id: number | string
-  username: string
-  avatar: string
-  status: number
+id: string                    // uuid
+username: string
+avatar: string
+status: number               // StatusEnum
+email: string
+emailVerified: boolean
+introduction: string
+telephoneNumber: string
+currentPlan: string          // SubscriptionPlan
+lastLoginTime: string        // ISO 时间字符串
 }
+
 
 export interface UserInfoWithSubscription extends UserInfo {
   subscription: UserSubscription | null
