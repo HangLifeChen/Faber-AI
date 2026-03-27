@@ -114,7 +114,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts" name="layout">
+
 import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
@@ -124,16 +125,12 @@ import {
   ArrowDown,
   Setting,
   SwitchButton,
-  Avatar,
   Connection,
   Reading,
-  Document,
   Tools,
   Monitor,
   Operation,
-  Management,
   Shop,
-  Cloudy,
   CreditCard,
 } from '@element-plus/icons-vue'
 
@@ -160,7 +157,7 @@ const isAgentExecutePage = computed(() => {
 const showSidebar = computed(() => route.meta.showSidebar !== false)
 
 // 用户下拉菜单命令处理
-const handleUserCommand = (command) => {
+const handleUserCommand = (command:string) => {
   switch (command) {
     case 'profile':
       // 跳转到个人资料页面

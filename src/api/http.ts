@@ -131,14 +131,14 @@ api.interceptors.response.use(
     } = error.config
 
     // 检查是否需要重试（网络错误或服务器错误）
+    const retryCount = parseInt(originalRequest.headers['x-retry-count']) || 0
     const shouldRetry =
       (error.code === 'ECONNABORTED' || // 超时
         error.code === 'ERR_NETWORK' || // 网络错误
         (error.response && (error.response.status >= 500 || error.response.status === 429))) && // 服务器错误或限流
-      originalRequest.headers['x-retry-count'] < MAX_RETRIES
+      retryCount < MAX_RETRIES
 
     if (shouldRetry) {
-      const retryCount = parseInt(originalRequest.headers['x-retry-count']) || 0
       originalRequest.headers['x-retry-count'] = retryCount + 1
 
       // 指数退避策略
@@ -164,14 +164,17 @@ api.interceptors.response.use(
     let errorMessage = error.message
 
     // 添加重试信息
-    if (originalRequest.headers['x-retry-count'] > 0) {
-      errorMessage += ` (已重试 ${originalRequest.headers['x-retry-count']} 次)`
+    const finalRetryCount = parseInt(originalRequest.headers['x-retry-count']) || 0
+    if (finalRetryCount > 0) {
+      errorMessage += ` (已重试 ${finalRetryCount} 次)`
     }
 
     // 添加请求URL信息（仅开发环境）
     if (import.meta.env.DEV) {
-      const url = originalRequest.baseURL + originalRequest.url
-      errorMessage += ` [${originalRequest.method?.toUpperCase()} ${url}]`
+      const baseUrl = originalRequest.baseURL ?? ''
+      const requestUrl = originalRequest.url ?? ''
+      const url = baseUrl + requestUrl
+      errorMessage += ` [${originalRequest.method?.toUpperCase() ?? 'UNKNOWN'} ${url}]`
     }
 
     const message = error.response?.data?.message || errorMessage || '请求失败，请稍后重试'
