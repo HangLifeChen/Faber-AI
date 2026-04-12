@@ -285,4 +285,4 @@ VITE_APP_TITLE=AI Agent Workflow
 
 ---
 
-**Faber-AI** - 让 AI 开发更简单、更高效
+**XY-AI** - 让 AI 开发更简单、更高效
