@@ -143,12 +143,11 @@
       </div>
     </el-card>
 
-    <!-- 新建智能体弹窗 -->
     <el-dialog
       v-model="createDialogVisible"
-      title="新建智能体"
+      :title="dialogTitle"
       width="500px"
-      :before-close="handleCreateDialogClose"
+      :before-close="handleDialogClose"
     >
       <el-form ref="createFormRef" :model="createForm" :rules="createRules" label-width="80px">
         <el-form-item label="名称" prop="name">
@@ -177,9 +176,9 @@
       </el-form>
       <template #footer>
         <span class="dialog-footer">
-          <el-button @click="handleCreateDialogClose">取消</el-button>
-          <el-button type="primary" @click="handleCreateConfirm" :loading="isCreating">
-            确认创建
+          <el-button @click="handleDialogClose">取消</el-button>
+          <el-button type="primary" @click="handleDialogConfirm" :loading="isSubmitting">
+            {{ dialogMode === 'edit' ? '确认保存' : '确认创建' }}
           </el-button>
         </span>
       </template>
@@ -227,19 +226,24 @@ const pagination = ref({
   pageSize: 8,
 })
 
-// 新建智能体弹窗相关
 const createDialogVisible = ref(false)
 const createFormRef = ref<FormInstance>()
-const isCreating = ref(false)
+const isSubmitting = ref(false)
+const dialogMode = ref<'create' | 'edit' | 'copy'>('create')
+const editingAgentId = ref<string | null>(null)
 
-// 新建智能体表单数据
+const dialogTitle = computed(() => {
+  if (dialogMode.value === 'edit') return '编辑智能体'
+  if (dialogMode.value === 'copy') return '复制智能体'
+  return '新建智能体'
+})
+
 const createForm = ref({
   name: '',
   description: '',
   status: 'draft',
 })
 
-// 新建智能体表单验证规则
 const createRules = ref<FormRules>({
   name: [
     { required: true, message: '请输入智能体名称', trigger: 'blur' },
@@ -286,39 +290,45 @@ const handleCurrentChange = (page: number) => {
 
 // 新建智能体
 const handleCreate = () => {
-  // 重置表单
+  dialogMode.value = 'create'
+  editingAgentId.value = null
   createForm.value = {
     name: '',
     description: '',
     status: 'draft',
   }
-  // 显示弹窗
   createDialogVisible.value = true
 }
 
-// 关闭新建弹窗
-const handleCreateDialogClose = () => {
+const handleDialogClose = () => {
   createDialogVisible.value = false
-  // 重置表单验证
+  dialogMode.value = 'create'
+  editingAgentId.value = null
   if (createFormRef.value) {
     createFormRef.value.resetFields()
   }
 }
 
-// 确认创建智能体
-const handleCreateConfirm = async () => {
+const handleDialogConfirm = async () => {
   if (!createFormRef.value) return
 
   await createFormRef.value.validate(async (valid) => {
-    if (valid) {
-      isCreating.value = true
-      try {
-        // 准备智能体数据
-        const agentData = {
+    if (!valid) return
+    isSubmitting.value = true
+    try {
+      if (dialogMode.value === 'edit') {
+        await AgentService.updateAgent({
+          id: editingAgentId.value!,
+          name: createForm.value.name,
+          description: createForm.value.description,
+          status: createForm.value.status as Agent['status'],
+        })
+        ElMessage.success('智能体更新成功')
+      } else {
+        const agentData: any = {
           name: createForm.value.name,
           description: createForm.value.description,
           status: createForm.value.status as 'draft' | 'published' | 'archived',
-          // 添加默认值
           modelProvider: 'openai',
           modelName: 'gpt-3.5-turbo',
           modelParameters: {
@@ -331,37 +341,48 @@ const handleCreateConfirm = async () => {
           systemPrompt: '',
           openingDialogue: '',
           suggestedQuestions: [],
-          creatorId: 'user', // 这里应该从用户状态中获取
+          creatorId: 'user',
           version: 1,
           visibility: 'private' as const,
           invocation_count: 0,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         }
-
-        // 调用API创建智能体
         await AgentService.createAgent(agentData)
-
-        // 关闭弹窗
-        handleCreateDialogClose()
-
-        // 显示成功消息
-        ElMessage.success('智能体创建成功')
-
-        // 重新加载智能体列表
-        await loadAgents()
-      } catch (error) {
-        console.error('创建智能体失败:', error)
-        ElMessage.error('创建智能体失败: ' + (error instanceof Error ? error.message : '未知错误'))
-      } finally {
-        isCreating.value = false
+        ElMessage.success(dialogMode.value === 'copy' ? '智能体复制成功' : '智能体创建成功')
       }
+
+      handleDialogClose()
+      await loadAgents()
+    } catch (error) {
+      console.error('操作失败:', error)
+      ElMessage.error('操作失败: ' + (error instanceof Error ? error.message : '未知错误'))
+    } finally {
+      isSubmitting.value = false
     }
   })
 }
 
 const handleEdit = (agent: Agent) => {
-  router.push(`/agents/${agent.id}/edit`)
+  dialogMode.value = 'edit'
+  editingAgentId.value = agent.id
+  createForm.value = {
+    name: agent.name,
+    description: agent.description || '',
+    status: agent.status,
+  }
+  createDialogVisible.value = true
+}
+
+const handleCopy = (agent: Agent) => {
+  dialogMode.value = 'copy'
+  editingAgentId.value = null
+  createForm.value = {
+    name: agent.name + ' (副本)',
+    description: agent.description || '',
+    status: 'draft',
+  }
+  createDialogVisible.value = true
 }
 
 const handleExecute = (agent: Agent) => {
@@ -376,8 +397,7 @@ const handleCommand = async (command: { action: string; agent: Agent }) => {
       handleEdit(agent)
       break
     case 'copy':
-      // 复制智能体逻辑
-      ElMessage.info('复制功能待实现')
+      handleCopy(agent)
       break
     case 'delete':
       try {
