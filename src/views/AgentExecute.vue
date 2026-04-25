@@ -777,11 +777,14 @@ const loadSessions = async () => {
 
     // 如果有会话历史，加载最新会话的消息
     if (sessionList.length > 0) {
-      // 设置当前会话为第一个会话（最新的会话）
+      const latestSession = [...sessionList].sort((a, b) => {
+        const timeA = a.timestamp || a.createdAt || 0
+        const timeB = b.timestamp || b.createdAt || 0
+        return new Date(timeB) - new Date(timeA)
+      })[0]
       if (!currentSession.value) {
-        currentSession.value = sessionList[0]
-        // 加载会话消息
-        await loadSessionMessages(sessionList[0].id)
+        currentSession.value = latestSession
+        await loadSessionMessages(latestSession.id)
       }
     } else {
       // 没有会话历史，清空当前会话和消息
