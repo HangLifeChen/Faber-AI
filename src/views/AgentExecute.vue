@@ -1054,7 +1054,6 @@ const sendMessage = async () => {
 
   try {
     // 使用流式传输方式发送消息
-    let accumulatedContent = ''
     let finalAnswerReceived = false
     // 用于处理跨chunk的数据缓冲区
     let buffer = ''
@@ -1324,21 +1323,28 @@ const sendMessage = async () => {
             }
           }
           if (payload.trim() === '[DONE]') {
-            // [DONE] 也是一个控制信号
             continue
+          }
+
+          // 其他非事件文本，作为流式文本内容实时渲染到 contents[0]
+          const payloadTrimmed = payload.trim()
+          if (payloadTrimmed && !payloadTrimmed.startsWith('{')) {
+            if (messageIndex < messages.value.length) {
+              messages.value[messageIndex].contents[0].content += payloadTrimmed
+            }
           }
         }
       },
       () => {
-        // 流传输完成
-        // 确保消息仍然存在
-        if (messageIndex < messages.value.length) {
-          messages.value[messageIndex].thinking = false // 确保结束时关闭思考状态
-          messages.value[messageIndex].status = 'received'
-          messages.value[messageIndex].timestamp = new Date()
-        }
-        if (!finalAnswerReceived) {
-          messages.value[messageIndex].contents[0].content = accumulatedContent
+        if (currentSession.value?.id) {
+          loadSessionMessages(currentSession.value.id)
+        } else if (messageIndex < messages.value.length) {
+          const msg = { ...messages.value[messageIndex] }
+          msg.thinking = false
+          msg.status = 'received'
+          msg.timestamp = new Date()
+          msg.contents = [...msg.contents.map((c) => ({ ...c }))]
+          messages.value.splice(messageIndex, 1, msg)
         }
       },
       (error) => {
